@@ -27,7 +27,7 @@
           </script>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>RL4VLM</title>
+            <title>Effective Reinforcement Learning for Reasoning in Language Models</title>
 
 
             <style>
@@ -131,6 +131,20 @@
 
 
                 /* Additional styles can go here */
+                /* .image-container {
+                display: flex;
+                gap: 16px;
+                }
+                .image-container img {
+                flex: 1 1 0;
+                max-width: 100%;
+                height: auto;
+                }
+                @media (max-width: 600px) {
+                .image-container {
+                    flex-direction: column;
+                }
+                } */
             </style>
 
     </head>
@@ -224,203 +238,149 @@
         <d-contents>
             <nav>
                 <h4>Contents</h4>
-                <div><a href="#method"> Training VLMs with RL</a></div>
-                <div><a href="#task"> Evaluation Tasks</a></div>
-                <div><a href="#result"> Experimental Results</a></div>
+                <div><a href="#sftvsrl"> SFT vs. On-Policy RL</a></div>
+                <div><a href="#dashvsgrpo"> DASH vs. GRPO</a></div>
+                <div><a href="#pgvsppo"> Policy Gradient vs. PPO Gradient Updates</a></div>
+                <div><a href="#kl"> KL Divergence Regularization</a></div>
+                <div><a href="#conclusion"> Conclusion</a></div>
+
             </nav>
         </d-contents>
 
         <d-figure>
-            <img src="images/teaser.png" width="100%">
-            <figcaption>
-                We propose a Reinforcement Learning (RL) training framework for
-                large Vision Language Models (VLM) or Multimodal Large Language Models (MLLM)
-                using task-specific rewards. At each time step, the VLM takes the current observation
-                and a system prompt as inputs and outputs a formatted utterance containing a
-                <font color="#6C8EBF"> chain of thought reasoning </font>
-                and <font color="#B85450"> a text action</font>. The action is parsed and mapped to the
-                environment producing a reward. We then apply RL with the task reward to fine-tune the VLM.
-            </figcaption>
+            <img src="images/side_by_side_aligned.png" width="100%">
+            <!-- <div class="image-container">
+                <img src="images/time.png" alt="Time Comparison">
+                <img src="images/preemptive_sampling.png" alt="Preemptive Sampling">
+            </div> -->
+            <p>
+                <br> 
+<strong>Post-training LMs with RL often demand massive compute and time. Since inference is far more memory-efficient than backpropagation, much larger batches are optimal for sampling. Empirically, sampling dominates total training time </strong>(right figure). We introduce the Distributed Aggregated Sampling Handler (DASH) (left figure) that dramatically reduces sampling time and accelerates training. DASH combines preemptive sampling (sampling of large batches with backpropagation in smaller chunks) and gradient filtering (discarding samples with low advantage estimates). It plugs into any sampling-based RL algorithm (on-policy or off-policy) and, versus GRPO, <strong>cuts training time by 83% without loss of accuracy</strong> (right figure). 
+<br> <br> Additionally, given that most RL methods were originally built for robotics rather than LM reasoning, we <strong>analyze design decisions</strong> for LM-focused RL to balance accuracy and efficiency on smaller models. We use Qwen2.5-{0.5B, 1.5B, 3B} models as our base models, all of which are not already post-trained.
+We use the MATH-500 dataset for training and in-distribution evaluation, and the GSM8K dataset for out-of-distribution evaluation. For coding we use the MBPP+ dataset.
+
+            </p>
         </d-figure>
-
-
-
 
         <section id="sftvsrl">
             <h2>SFT vs. On-Policy RL</h2>
-
+<h3>For the models we consider, we find on-policy RL to be effective but not SFT </h3>
             <p>
-                We propose an algorithmic framework that directly fine-tune a large vision-language model (VLM)
-                or Multimodal large language model (MLLM) using Reinforcement Learning (RL), using task rewards.
+We compare three algorithms: (i) SFT with human-written reasoning traces, denoted SFT-H, (ii) SFT with reasoning traces from Qwen2.5-7B-Instruct, denoted SFT-M, and (iii) DASH. Results are shown in the table below. As can be seen, DASH improves performance both in-distribution and out-of-distribution, demonstrating that on-policy algorithms can efficiently learn mathematical reasoning skills that generalize across datasets. On the other hand, neither SFT-H nor SFT-M improve performance, with SFT-H significantly degrading both in-distribution and out-of-distribution performance. Intuitively, the substantial performance degradation caused by SFT-H can be attributed to the fact that human reasoning often omits many intermediate steps, which is especially problematic for smaller LMs.
+<br> <br> 
+For coding, we train on human programs in MBPP+. As shown in the table below, DASH outperforms SFT
+in most cases, demonstrating the the general effectiveness of on-policy RL at improving the reasoning capabilities of LMs.
+To the best of our knowledge, these are among the first results to show that on-policy RL can improve code generation for
+smaller LMs.
 
             </p>
             <d-figure>
-                <img src="images/diagram.png" width="100%">
-                <figcaption>
-                    An overview of our RL training framework for VLM. Our method contains three key components:
-                    (1) Designing the input prompt $v_t^\text{in}$, for obtaining a formatted output $v_t^\text{out}$;
-                    (2) Post-processing the output text $v_t^\text{out}$ for a legal action $a_t$;
-                    (3) Estimating the action probability $\pi_\theta(a_t|o_t,v_t^\text{in})$.
-                </figcaption>
+                <img src="images/sftvsrl.png" width="100%">
             </d-figure>
 
-            <h3> Designing the input prompt $v_t^\text{in}$ </h3>
-            We design a $v_t^\text{in}$ in the following format, containing (1) task description; (2) legal action space;
-            and (3) the desired output format $v_t^\text{out}$(containing the CoT reasoning).
-
-            <d-figure>
-                <img src="images/prompt_1.png" alt="SEAL-Bench Results" width="100%" style="display: block; margin-left: auto; margin-right: auto;">
-                <figcaption>
-                    Task-specific CoT prompt input $v_t^\text{in}$, where the <font color="#6C8EBF"> blue part </font>
-                    represents the CoT reasoning and the <font color="#B85450"> red part </font> is the text-based action.
-                </figcaption>
-            </d-figure>
-
-            <h3> Post-processing the output text $v_t^\text{out}$ </h3>
-            We post-process the output text $v_t^\text{out}$ by directly searching for the keywords of
-            "action": "$a$", where $a\in\mathcal{A}$ is the text version of a legal action.
-            If the output text $v_t^\text{out}$ does not contain a legal action,
-            we perform random exploration in the legal action space.
-            \begin{equation}
-                f(v^\text{out}) = \begin{cases}
-                a,& \text{if } \texttt{"}\mathtt{action}\texttt{"}: \texttt{"}a\texttt{"}\in v^\text{out},\\
-                \mathtt{Unif}(\mathcal{A}),& \text{otherwise.}
-                \end{cases}
-            \end{equation}
-            </p>
-
-            <h3> Estimating the action probability $\pi_\theta(a_t|o_t,v_t^\text{in})$ </h3>
-            A naive way to compute the log action probability $\log \pi_\theta(a_t|o_t,v_t^\text{in})$ is to
-            directly sum up the log probability of each token in $v_t^\text{out}$ via:
-            \begin{equation*}
-                \log\pi_\theta(a_t|o_t,v_t^\text{in})\leftarrow\log \pi_\theta({\color{#6C8EBF} v^\text{tht}_t}|o_t,v^\text{in}_t) + \log \pi_\theta({\color{#B85450} v^\text{act}_t}|o_t,v^\text{in}_t,v^\text{tht}_t).
-            \end{equation*}
-            However, since our method directly parse the action tokens ${\color{#B85450} v^\text{act}_t}$ to obtain
-            the legal action $a_t$, and the CoT tokens ${\color{#6C8EBF} v^\text{tht}_t}$ are generally much longer
-            than the action tokens ${\color{#B85450} v^\text{act}_t}$, we adopt a regularized version that scale down
-            the log probability of the CoT tokens ${\color{#6C8EBF} v^\text{tht}_t}$ by a factor $\lambda\in[0,1]$,
-            which results in:
-            \begin{equation*}
-                \log\pi_\theta(a_t|o_t,v_t^\text{in})\leftarrow\lambda \log \pi_\theta({\color{#6C8EBF} v^\text{tht}_t}|o_t,v^\text{in}_t) + \log \pi_\theta({\color{#B85450} v^\text{act}_t}|o_t,v^\text{in}_t,v^\text{tht}_t).
-            \end{equation*}
-            We found that choosing a moderate value of $\lambda$ (e.g., $\lambda\in[0.2,0.5]$) works well in practice.
-        </section>
+            
 
     </section>
 
-    <section id="dashvsgrpo">
+
+  <section id="dashvsgrpo">
         <h2> DASH vs. GRPO</h2>
-        <h3> Improving VLM agents' decision-making capabilities </h3>
-        We show that our method can enable a backbone <a href="https://github.com/haotian-liu/LLaVA" class="code-link">LLaVA-1.6-7b</a>
-        model to outperform commercial models (<a href="https://openai.com/index/gpt-4v-system-card" class="code-link">GPT4-V</a>
-        and <a href="https://gemini.google.com/" class="code-link">Gemini</a>), and supervised fine-tuned LLaVA-7b.
-        <d-figure>
-            <img src="images/tab-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                Our method achieves the best overall performance in both GymCards and ALFWorld
-                (without expert data) environments.
-            </figcaption>
-            <img src="images/curves-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
-        </d-figure>
-        <h3> The importance of CoT reasoning </h3>
-        We demonstrate that the CoT reasoning is a crucial component of our method --
-        the performance of our method significantly deteriorates without the CoT reasoning.
-        <d-figure>
-            <img src="images/tab-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-            </figcaption>
-            <img src="images/curves-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
-        </d-figure>
+        <h3> Preemptive and Parallel Sampling</h3>
+We sample a large number of trajectories in one batch, and then perform backpropagation on these samples in smaller batches. <strong>Preemptive sampling can be further sped up by using multiple inference servers in parallel.</strong>  We note that parallel sampling provides the amortized speed-up <strong>only when sampling is done in large batches</strong>. This is due to internal speed-up mechanisms for single sampling servers when the batch size is small. We also note that <strong>to avoid out-of-memory issues</strong> on the backpropagation servers, large batches of samples are <strong>cached and delivered  <i>upon request</i>.</strong>
+<br> <br> 
+            <d-figure>
+                <center>
+                <img src="images/preemptive_sampling.png" width="60%">
+                <figcaption>
+                    <br>
+                    Illustration of preemptive sampling. We use $H$ GPUs for inference and $H'$ for backpropagation; they are shown in blue and green, respectively. Given a batch of $M$ prompts $\{x_1, \ldots, x_M\}$. The inference GPUs then generate corresponding responses $\{\hat{y}_1, \ldots, \hat{y}_M\}$, which are aggregated across GPUs into CPU memory. When a backpropagation GPU requests generations for a prompt $x_m$, the corresponding cached response $y_m$ is retrieved and delivered. Since we are using groups for advantage estimation, each prompt $x_m$ is duplicated to form groups, and all generations in the same group are sent to the backpropagation GPU upon request.
+                </figcaption>
+                </center>
+            </d-figure>
 
+<h3>Gradient Filtering</h3>
+<p>We drop examples with small advantage estimates. If the advantage estimate is small, then the contribution to the gradient is likely to be small (unless the policy gradient happens to be very large, which we find to be unlikely in practice). Intuitively, these are examples where the model either almost always gets the answer right (in which case there is nothing new to learn) or almost always gets it wrong (in which case the problem is currently too difficult to learn).</p>
+<h3>Experimental Results</h3>
+<p>We compare DASH to GRPO both in terms of accuracy and running time by training Qwen2.5-0.5B using both GRPO and DASH. We also use an ablation of DASH without gradient filtering, denoted No-GF. Results are shown in the tables below. As can be seen, DASH significantly reduces GRPO training time (from 38.9 hours to 6.6 hours) without any significant reduction in performance, highlighting the effectiveness of preemptive sampling and gradient filtering.
+    <d-figure>
+            <img src="images/dashvsgrpo.png" width="100%">
+    </d-figure>
+Compared to No-GF, DASH reduces running time by 4% without any significant reduction in performance. The effectiveness of gradient filtering can be improved to 10%; see the appendix of our paper. The impact of GF on training dynamics is illustrated in Figure 3. Specifically, as shown in Figure 3(a), gradient filtering
+increases the average absolute advantage values, leading to more significant gradient updates; consequently, as shown in
+Figure 3(b), forward and backward pass running times are reduced. Finally, since only samples inducing trivial gradient
+updates are filtered out, the training curves remain similar before and after applying gradient filtering, as shown in Figure 3(c).</p>
+        <d-figure>
+            <img src="images/gf.png" width="100%">
+        </d-figure>
+    
     </section>
+
 
     <section id="pgvsppo">
         <h2>Policy Gradient vs. PPO Gradient Updates</h2>
-        <h3> Improving VLM agents' decision-making capabilities </h3>
-        We show that our method can enable a backbone <a href="https://github.com/haotian-liu/LLaVA" class="code-link">LLaVA-1.6-7b</a>
-        model to outperform commercial models (<a href="https://openai.com/index/gpt-4v-system-card" class="code-link">GPT4-V</a>
-        and <a href="https://gemini.google.com/" class="code-link">Gemini</a>), and supervised fine-tuned LLaVA-7b.
-        <d-figure>
-            <img src="images/tab-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                Our method achieves the best overall performance in both GymCards and ALFWorld
-                (without expert data) environments.
-            </figcaption>
-            <img src="images/curves-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
-        </d-figure>
-        <h3> The importance of CoT reasoning </h3>
-        We demonstrate that the CoT reasoning is a crucial component of our method --
-        the performance of our method significantly deteriorates without the CoT reasoning.
-        <d-figure>
-            <img src="images/tab-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-            </figcaption>
-            <img src="images/curves-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
-        </d-figure>
+        <h3> PPO has significantly higher variance compared to Policy Gradient, which is
+the opposite of conventional wisdom </h3>
+Note that since DASH takes one gradient step only for each new sample, it coincides with the Policy Gradient algorithm. On the other hand, PPO allows multiple gradient descents on each sample (for detailed comparison, check section 3.2 of our paper). We thus consider two implementations of PPO.
+First, we can take K gradient steps using all M
+samples, which we call PPO-Multi (or just Multi).
+Second, we can divide the M examples into K
+mini-batches of size M/K each, and take one gradient step on each mini-batch, which we call PPO-Mini (or just Mini).
 
+<br> <br> 
+We compare DASH to Multi and Mini. DASH uses a batch size of M = 256 (with K = 1), Multi uses M = 256
+and K = 3, and Mini uses M = 8 so K = 32. Multi and Mini are slower than DASH; for fair comparison, we truncate
+their training times to match the wall-clock time of DASH. The results are shown in Table 5, and training curves are shown
+in Figure 4. As can be seen, Multi and Mini achieve faster initial performance improvements and have slightly higher
+accuracies; however, they have significantly more unstable training curves. Similar results for the 1.5B model are in the appendix of our paper.
+        <d-figure>
+            <img src="images/multimini.png" width="100%">
+        </d-figure>
+ 
     </section>
+
+
+
 
     <section id="kl">
         <h2>KL Divergence Regularization</h2>
-        <h3> Improving VLM agents' decision-making capabilities </h3>
-        We show that our method can enable a backbone <a href="https://github.com/haotian-liu/LLaVA" class="code-link">LLaVA-1.6-7b</a>
-        model to outperform commercial models (<a href="https://openai.com/index/gpt-4v-system-card" class="code-link">GPT4-V</a>
-        and <a href="https://gemini.google.com/" class="code-link">Gemini</a>), and supervised fine-tuned LLaVA-7b.
+        <h3> Removing KL divergence regularization can lead to more concise generations
+and higher accuracies </h3>
+ We compare DASH to an ablation without the KL divergence term, denoted No-KL. Training reward curves are shown
+in Figure 6(a). As can be seen, removing KL divergence regularization generally leads to higher rewards during training;
+most likely, No-KL can focus on reward optimization without being constrained to stay close to the initial model. As shown
+in Table 6, No-KL achieves greater in- and out-of-distribution than DASH (except in the case of the out-of-distribution
+accuracy of the 3B model).
+<br> <br> 
+Furthermore, as shown in Figure 6(b), we find that for No-KL, the average generation length is shorter, thereby reducing
+overall training time; this difference is also reflected in Table 6. We hypothesize that to compensate for KL divergence
+regularization, models must generate longer reasoning traces.
         <d-figure>
-            <img src="images/tab-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                Our method achieves the best overall performance in both GymCards and ALFWorld
-                (without expert data) environments.
-            </figcaption>
-            <img src="images/curves-imp.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method compared against other methods.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
+            <img src="images/nokl.png" width="100%">
         </d-figure>
-        <h3> The importance of CoT reasoning </h3>
-        We demonstrate that the CoT reasoning is a crucial component of our method --
-        the performance of our method significantly deteriorates without the CoT reasoning.
         <d-figure>
-            <img src="images/tab-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-            </figcaption>
-            <img src="images/curves-cot.png" width="100%">
-            <figcaption>
-                The average episode success rate of our method with
-                and without the CoT reasoning.
-                The curves of Points24 are not provided because no method achieves a reasonable performance.
-            </figcaption>
+            <center>
+            <img src="images/nokltable.png" width="70%">
+            </center>
+        </d-figure>
+                <h3> RL concentrates probability mass and reduces generation diversity </h3>
+
+Finally, for the 3B model, we study how KL divergence regularization affects pass@k. Results are in Figure 5: No-KL performs best for small k, although the gap closes for
+larger k. Intuitively, RL concentrates probability mass and reduces generation diversity (Shypula et al., 2025; West & Potts, 2025).
+        <d-figure>
+            <center>
+            <img src="images/pass.png" width="60%">
+            </center>
         </d-figure>
 
     </section>
+
+   <section id="conclusion">
+        <h2>Conclusion</h2>
+ We have performed a careful empirical analysis of several key design decisions in RL algorithms for improving language model reasoning, with a focus on computationally constrained scenarios; these include SFT vs. on-policy RL, policy gradient vs. PPO, and whether KL divergence regularization is used. Furthermore, we identify the sampling strategy as the primary computational bottleneck in on-policy RL; to address these issues, we propose DASH, a novel algorithm using preemptive sampling and gradient filtering to improve efficiency. We demonstrate that DASH can reduce RL training time by 83\% while maintaining performance. More broadly, we believe that systematizing the study of RL for language model reasoning is key to designing more effective RL algorithms in this domain, which differs significantly from robotics domains targeted by existing RL algorithms such as PPO. Our study is a first step in this direction.
+
+    </section>
+
+
 
         </d-article>
         <d-appendix>
