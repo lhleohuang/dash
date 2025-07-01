@@ -254,11 +254,12 @@
                 <img src="images/preemptive_sampling.png" alt="Preemptive Sampling">
             </div> -->
             <p>
-                <br> 
-<strong>Post-training LMs with RL often demand massive compute and time. Since inference is far more memory-efficient than backpropagation, much larger batches are optimal for sampling. Empirically, sampling dominates total training time </strong>(right figure). We introduce the Distributed Aggregated Sampling Handler (DASH) (left figure) that dramatically reduces sampling time and accelerates training. DASH combines preemptive sampling (sampling of large batches with backpropagation in smaller chunks) and gradient filtering (discarding samples with low advantage estimates). It plugs into any sampling-based RL algorithm (on-policy or off-policy) and, versus GRPO, <strong>cuts training time by 83% without loss of accuracy</strong> (right figure). 
-<br> <br> Additionally, given that most RL methods were originally built for robotics rather than LM reasoning, we <strong>analyze design decisions</strong> for LM-focused RL to balance accuracy and efficiency on smaller models. We use Qwen2.5-{0.5B, 1.5B, 3B} models as our base models, all of which are not already post-trained.
-We use the MATH-500 dataset for training and in-distribution evaluation, and the GSM8K dataset for out-of-distribution evaluation. For coding we use the MBPP+ dataset.
-
+              <br>
+	      Recent work has demonstrated that post-training language models (LMs) with reinforcement learning (RL) can unlock significant mathematics and coding capabilities. However, existing RL algorithms can require massive compute and time, making it infeasible without expensive hardware. <strong>Critically, existing RL algorithms are tailored towards robotics tasks, whereas training LMs is qualitatively different.</strong> We re-evaluate existing RL design decisions, gaining valuable insights on how to design more effective RL algorithms for improving LM reasoning. For instance, we find that on-policy RL significantly outperforms SFT, at least for the smaller LMs we try. Furthermore, among online RL algorithms, we find that fancy choices such as KL divergence regularization and PPO gradient updates are unnecessary -- in fact, the vanilla policy gradient algorithm performs best.
+	      <br><br>
+	      <strong>Our most impactful insight is that the memory gap between backpropagation and inference results in a key computational bottleneck.</strong> Specifically, the optimal batch size is significantly larger for inference than for training. When not accounted for, this leads sampling to dominate total training time (right figure). To fix this issue, we propose the Distributed Aggregated Sampling Handler (DASH), which dramatically reduces sampling time and accelerates training (left figure). DASH combines preemptive sampling (sampling of large batches with backpropagation in smaller chunks) and gradient filtering (discarding samples with low advantage estimates). It plugs into any sampling-based RL algorithm (on-policy or off-policy). Compared to GRPO, it cuts training time by 83% without loss of accuracy (right figure). In these results, we use the Qwen2.5-{0.5B, 1.5B, 3B} models (which have not been post-trained) as our base models, and the MATH-500 dataset for training and evaluation.
+	      <br><br>
+	      We give details on all of the insights from our experiments below.
             </p>
         </d-figure>
 
